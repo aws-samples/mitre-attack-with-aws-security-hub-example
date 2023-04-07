@@ -1,0 +1,325 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   Conformance Pack:
+#     Operational Best Practices for MITRE ATT&CK v12
+#
+#   This conformance pack helps verify compliance with MITRE ATT&CK v12 Cloud mitigation requirements.
+#
+#   See Parameters section for names and descriptions of required parameters.
+#
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Enable MITRE ATT&CK ConformancePack for AWS Config
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - 
+        Label:
+          default: "Conformance Pack"
+        Parameters:
+          - S3Bucket       
+          - ConformancePackFile
+      - 
+        Label:
+          default: Restricted Incoming Traffic
+        Parameters:
+          - VpcSgOpenOnlyToAuthorizedPortsParamAuthorizedTcpPorts
+          - RestrictedIncomingTrafficParamBlockedPort1
+          - RestrictedIncomingTrafficParamBlockedPort2
+          - RestrictedIncomingTrafficParamBlockedPort3
+          - RestrictedIncomingTrafficParamBlockedPort4
+          - RestrictedIncomingTrafficParamBlockedPort5
+      - 
+        Label:
+          default: S3 Public Access Restriction
+        Parameters:
+          - S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicAcls
+          - S3AccountLevelPublicAccessBlocksPeriodicParamIgnorePublicAcls
+          - S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicPolicy
+          - S3AccountLevelPublicAccessBlocksPeriodicParamRestrictPublicBuckets
+      - 
+        Label:
+          default: Redshift Security Configuration
+        Parameters:
+          - RedshiftClusterMaintenancesettingsCheckParamAllowVersionUpgrade
+          - RedshiftClusterConfigurationCheckParamClusterDbEncrypted
+          - RedshiftClusterConfigurationCheckParamLoggingEnabled
+      -
+        Label:
+          default: IAM Credentials Configuration
+        Parameters:
+          - IamUserUnusedCredentialsCheckParamMaxCredentialUsageAge
+          - AccessKeysRotatedParamMaxAccessKeyAge
+          - IamPasswordPolicyParamMaxPasswordAge
+          - IamPasswordPolicyParamPasswordReusePrevention
+          - IamPasswordPolicyParamMinimumPasswordLength          
+          - IamPasswordPolicyParamRequireLowercaseCharacters
+          - IamPasswordPolicyParamRequireUppercaseCharacters
+          - IamPasswordPolicyParamRequireNumbers
+          - IamPasswordPolicyParamRequireSymbols
+      -
+        Label:
+          default: Load Balancer Security Configuration
+        Parameters:
+          - ElbPredefinedSecurityPolicySslCheckParamPredefinedPolicyName
+          - AcmCertificateExpirationCheckParamDaysToExpiration
+      -
+        Label:
+          default: Cloudwatch Alarms Security Configuration
+        Parameters:
+          - CloudwatchAlarmActionCheckParamOkActionRequired
+          - CloudwatchAlarmActionCheckParamInsufficientDataActionRequired
+          - CloudwatchAlarmActionCheckParamAlarmActionRequired
+
+    ParameterLabels:
+      S3Bucket:
+        Default: S3 Bucket
+      ConformancePackFile:
+        Default: Conformance Pack
+      VpcSgOpenOnlyToAuthorizedPortsParamAuthorizedTcpPorts:
+        default: VPC Open Authorized Port
+      RestrictedIncomingTrafficParamBlockedPort1:
+        default: Blocked Port 1
+      RestrictedIncomingTrafficParamBlockedPort2:
+        default: Blocked Port 2
+      RestrictedIncomingTrafficParamBlockedPort3:
+        default: Blocked Port 3
+      RestrictedIncomingTrafficParamBlockedPort4:
+        default: Blocked Port 4
+      RestrictedIncomingTrafficParamBlockedPort5:
+        default: Blocked Port 5
+      S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicAcls:
+        default: Block Public Acls
+      S3AccountLevelPublicAccessBlocksPeriodicParamIgnorePublicAcls:
+        default: Ignore Public Acls
+      S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicPolicy:
+        default: Block Public Policy
+      S3AccountLevelPublicAccessBlocksPeriodicParamRestrictPublicBuckets:
+        default: Restrick Public Buckets
+      RedshiftClusterMaintenancesettingsCheckParamAllowVersionUpgrade:
+        default: Allow Version Upgrade
+      RedshiftClusterConfigurationCheckParamClusterDbEncrypted:
+        default: Check Parameter Encryption
+      RedshiftClusterConfigurationCheckParamLoggingEnabled:
+        default: Check Parameter Logging Enabled
+      IamUserUnusedCredentialsCheckParamMaxCredentialUsageAge:
+        default: Check Credential Usage Age
+      IamPasswordPolicyParamMaxPasswordAge:
+        default: Max Password Age
+      IamPasswordPolicyParamPasswordReusePrevention:
+        default: Password Reuse Prevention
+      IamPasswordPolicyParamMinimumPasswordLength:
+        default: Password Minimum Length
+      IamPasswordPolicyParamRequireLowercaseCharacters:
+        default: Password Require Lowercase
+      IamPasswordPolicyParamRequireNumbers:
+        default: Password Require Numbers
+      IamPasswordPolicyParamRequireSymbols:
+        default: Password Require Symbols
+      IamPasswordPolicyParamRequireUppercaseCharacters:
+        default: Password Require Uppercase
+      AccessKeysRotatedParamMaxAccessKeyAge:
+        default: Maxx AccessKey Age
+      ElbPredefinedSecurityPolicySslCheckParamPredefinedPolicyName:
+        default: Predefined SSL Policy
+      AcmCertificateExpirationCheckParamDaysToExpiration:
+        default: ACM Certificate Days To Expiration
+      CloudwatchAlarmActionCheckParamOkActionRequired:
+        default: Ok-Action Required
+      CloudwatchAlarmActionCheckParamInsufficientDataActionRequired:
+        default: Insufficient-Data-Action Required
+      CloudwatchAlarmActionCheckParamAlarmActionRequired:
+        default: Alarm-Action Required
+
+Parameters:
+  S3Bucket:
+    Description: "ConformancePack S3 bucket"
+    Type: String
+    Default: "bucket"
+  ConformancePackFile:
+    Description: "ConformancePack folder and file name in S3"
+    Type: String
+    Default: "folder/Operational-Best-Practices-for-MITRE-ATT&CK.yaml"
+  RestrictedIncomingTrafficParamBlockedPort1:
+    Default: '20'
+    Type: String
+  RestrictedIncomingTrafficParamBlockedPort2:
+    Default: '21'
+    Type: String
+  RestrictedIncomingTrafficParamBlockedPort3:
+    Default: '3389'
+    Type: String
+  RestrictedIncomingTrafficParamBlockedPort4:
+    Default: '3306'
+    Type: String
+  RestrictedIncomingTrafficParamBlockedPort5:
+    Default: '4333'
+    Type: String
+  VpcSgOpenOnlyToAuthorizedPortsParamAuthorizedTcpPorts:
+    Default: '443'
+    Type: String
+  S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicAcls:
+    Default: 'True'
+    Type: String
+  S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicPolicy:
+    Default: 'True'
+    Type: String
+  S3AccountLevelPublicAccessBlocksPeriodicParamIgnorePublicAcls:
+    Default: 'True'
+    Type: String
+  S3AccountLevelPublicAccessBlocksPeriodicParamRestrictPublicBuckets:
+    Default: 'True'
+    Type: String
+  RedshiftClusterMaintenancesettingsCheckParamAllowVersionUpgrade:
+    Default: 'true'
+    Type: String
+  RedshiftClusterConfigurationCheckParamClusterDbEncrypted:
+    Default: 'TRUE'
+    Type: String
+  RedshiftClusterConfigurationCheckParamLoggingEnabled:
+    Default: 'TRUE'
+    Type: String
+  IamUserUnusedCredentialsCheckParamMaxCredentialUsageAge:
+    Default: '45'
+    Type: String
+  IamPasswordPolicyParamMaxPasswordAge:
+    Default: '365'
+    Type: String
+  IamPasswordPolicyParamMinimumPasswordLength:
+    Default: '14'
+    Type: String
+  IamPasswordPolicyParamPasswordReusePrevention:
+    Default: '24'
+    Type: String
+  IamPasswordPolicyParamRequireLowercaseCharacters:
+    Default: 'true'
+    Type: String
+  IamPasswordPolicyParamRequireNumbers:
+    Default: 'true'
+    Type: String
+  IamPasswordPolicyParamRequireSymbols:
+    Default: 'true'
+    Type: String
+  IamPasswordPolicyParamRequireUppercaseCharacters:
+    Default: 'true'
+    Type: String
+  ElbPredefinedSecurityPolicySslCheckParamPredefinedPolicyName:
+    Default: ELBSecurityPolicy-TLS-1-2-2017-01
+    Type: String
+  CloudwatchAlarmActionCheckParamOkActionRequired:
+    Default: 'FALSE'
+    Type: String
+  CloudwatchAlarmActionCheckParamInsufficientDataActionRequired:
+    Default: 'TRUE'
+    Type: String
+  CloudwatchAlarmActionCheckParamAlarmActionRequired:
+    Default: 'TRUE'
+    Type: String
+  AccessKeysRotatedParamMaxAccessKeyAge:
+    Default: '90'
+    Type: String
+  AcmCertificateExpirationCheckParamDaysToExpiration:
+    Default: '90'
+    Type: String
+
+Mappings: {}
+
+Conditions: {} 
+
+Resources: 
+  ConformancePack:
+    Type: AWS::Config::ConformancePack
+    Properties:
+      ConformancePackInputParameters:
+        -
+          ParameterName: RestrictedIncomingTrafficParamBlockedPort1
+          ParameterValue: !Ref RestrictedIncomingTrafficParamBlockedPort1
+        -
+          ParameterName: RestrictedIncomingTrafficParamBlockedPort2
+          ParameterValue: !Ref RestrictedIncomingTrafficParamBlockedPort2
+        -
+          ParameterName: RestrictedIncomingTrafficParamBlockedPort3
+          ParameterValue: !Ref RestrictedIncomingTrafficParamBlockedPort3
+        -
+          ParameterName: RestrictedIncomingTrafficParamBlockedPort4
+          ParameterValue: !Ref RestrictedIncomingTrafficParamBlockedPort4
+        -
+          ParameterName: RestrictedIncomingTrafficParamBlockedPort5
+          ParameterValue: !Ref RestrictedIncomingTrafficParamBlockedPort5
+        -
+          ParameterName: VpcSgOpenOnlyToAuthorizedPortsParamAuthorizedTcpPorts
+          ParameterValue: !Ref VpcSgOpenOnlyToAuthorizedPortsParamAuthorizedTcpPorts
+        -
+          ParameterName: S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicAcls
+          ParameterValue: !Ref S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicAcls
+        -
+          ParameterName: S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicPolicy
+          ParameterValue: !Ref S3AccountLevelPublicAccessBlocksPeriodicParamBlockPublicPolicy
+        -
+          ParameterName: S3AccountLevelPublicAccessBlocksPeriodicParamIgnorePublicAcls
+          ParameterValue: !Ref S3AccountLevelPublicAccessBlocksPeriodicParamIgnorePublicAcls
+        -
+          ParameterName: S3AccountLevelPublicAccessBlocksPeriodicParamRestrictPublicBuckets
+          ParameterValue: !Ref S3AccountLevelPublicAccessBlocksPeriodicParamRestrictPublicBuckets
+        -
+          ParameterName: RedshiftClusterMaintenancesettingsCheckParamAllowVersionUpgrade
+          ParameterValue: !Ref RedshiftClusterMaintenancesettingsCheckParamAllowVersionUpgrade
+        -
+          ParameterName: RedshiftClusterConfigurationCheckParamClusterDbEncrypted
+          ParameterValue: !Ref RedshiftClusterConfigurationCheckParamClusterDbEncrypted
+        -
+          ParameterName: RedshiftClusterConfigurationCheckParamLoggingEnabled
+          ParameterValue: !Ref RedshiftClusterConfigurationCheckParamLoggingEnabled
+        -
+          ParameterName: IamUserUnusedCredentialsCheckParamMaxCredentialUsageAge
+          ParameterValue: !Ref IamUserUnusedCredentialsCheckParamMaxCredentialUsageAge
+        -
+          ParameterName: IamPasswordPolicyParamMaxPasswordAge
+          ParameterValue: !Ref IamPasswordPolicyParamMaxPasswordAge
+        -
+          ParameterName: IamPasswordPolicyParamMinimumPasswordLength
+          ParameterValue: !Ref IamPasswordPolicyParamMinimumPasswordLength
+        -
+          ParameterName: IamPasswordPolicyParamPasswordReusePrevention
+          ParameterValue: !Ref IamPasswordPolicyParamPasswordReusePrevention
+        -
+          ParameterName: IamPasswordPolicyParamRequireLowercaseCharacters
+          ParameterValue: !Ref IamPasswordPolicyParamRequireLowercaseCharacters
+        -
+          ParameterName: IamPasswordPolicyParamRequireNumbers
+          ParameterValue: !Ref IamPasswordPolicyParamRequireNumbers
+        -
+          ParameterName: IamPasswordPolicyParamRequireSymbols
+          ParameterValue: !Ref IamPasswordPolicyParamRequireSymbols
+        -
+          ParameterName: IamPasswordPolicyParamRequireUppercaseCharacters
+          ParameterValue: !Ref IamPasswordPolicyParamRequireUppercaseCharacters
+        -
+          ParameterName: ElbPredefinedSecurityPolicySslCheckParamPredefinedPolicyName
+          ParameterValue: !Ref ElbPredefinedSecurityPolicySslCheckParamPredefinedPolicyName
+        -
+          ParameterName: CloudwatchAlarmActionCheckParamOkActionRequired
+          ParameterValue: !Ref CloudwatchAlarmActionCheckParamOkActionRequired
+        -
+          ParameterName: CloudwatchAlarmActionCheckParamInsufficientDataActionRequired
+          ParameterValue: !Ref CloudwatchAlarmActionCheckParamInsufficientDataActionRequired
+        -
+          ParameterName: CloudwatchAlarmActionCheckParamAlarmActionRequired
+          ParameterValue: !Ref CloudwatchAlarmActionCheckParamAlarmActionRequired
+        -
+          ParameterName: AccessKeysRotatedParamMaxAccessKeyAge
+          ParameterValue: !Ref AccessKeysRotatedParamMaxAccessKeyAge
+        -
+          ParameterName: AcmCertificateExpirationCheckParamDaysToExpiration
+          ParameterValue: !Ref AcmCertificateExpirationCheckParamDaysToExpiration
+      ConformancePackName: "vsoc-mitreintsh-conformance-pack"
+      TemplateS3Uri: !Sub "s3://${S3Bucket}/${ConformancePackFile}"
+
+Outputs:
+  MitreConformancePack:
+    Description: Conformance Pack
+    Value: !Ref ConformancePack

@@ -1,0 +1,17 @@
+HR-03,Security training and awareness-raising programme
+IDM-01,Policy for system and data access authorisations
+IDM-02,User registration
+IDM-06,Administrator authorisations
+IDM-08,Secure login methods
+IDM-11,Password requirements and validation parameters
+IDM-12,Restriction and control of administrative software
+KOS-01,Technical safeguards
+KOS-02,Monitoring of connections
+KOS-03,Cross-network access
+KRY-02,Encryption of data for transmission (transport encryption)
+KRY-03,Encryption of sensitive data for storage
+RB-05,Protection against malware
+RB-06,Data backup and restoration â€“ concept
+RB-21,"Handling of vulnerabilities, malfunctions and errors â€“ check of open vulnerabilities"
+RB-22,"Handling of vulnerabilities, malfunctions and errors â€“ system hardening"
+RB-23,Segregation of stored and processed data of the cloud customers in jointly used resources

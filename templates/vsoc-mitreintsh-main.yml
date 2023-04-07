@@ -1,0 +1,371 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   VSOC MITRE ATT&CK Integration StackSet Template:
+# 
+#   Deploys and configures AWS services and resources in order to enrich
+#   Security Hub findings and events with MITRE ATT&CK v12 information.
+#
+#   See Parameters section for names and descriptions of required parameters.
+# 
+#  MIT License:
+#
+#  Copyright (c) 2023
+#
+#  Permission is hereby granted, free of charge, to any person obtaining a copy
+#  of this software and associated documentation files (the "Software"), to deal
+#  in the Software without restriction, including without limitation the rights
+#  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#  copies of the Software, and to permit persons to whom the Software is
+#  furnished to do so, subject to the following conditions:
+#
+#  The above copyright notice and this permission notice shall be included in all
+#  copies or substantial portions of the Software.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#  SOFTWARE.
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: VSOC MITRE ATT&CK Integration with Security Hub StackSet
+
+Metadata: 
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Ownership
+        Parameters:
+          - Owner
+          - ProjectName
+          - DeleteAfter
+      - Label:
+          default: Files and Folders
+        Parameters:
+          - S3BucketURL
+          - ConformancePackS3
+          - ConformancePackFile
+          - LambdaS3
+          - IntegratorFile
+          - QuerierFile
+          - LayerArn
+      - Label:
+          default: Protection
+        Parameters:
+          - EnableConfigDefault
+      - Label:
+          default: Detection
+        Parameters:
+          - EnableSecurityHubDefault
+          - EnableGuardDutyDefault         
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VPC
+          - RDSSubnetIdList
+          - LambdaSubnetIdList
+      - Label:
+          default: RDS Configuration
+        Parameters:
+          - RDSSnapshotArn
+          - Language
+
+    ParameterLabels:
+      Owner:
+        default: Team or Individual Owner
+      DeleteAfter:
+        default: Delete After Date
+      S3BucketURL:
+        default: S3 Bucket URL
+      EnableConfigDefault:
+        default: Enable AWS Config using default configuration?
+      ConformancePackS3:
+        Default: S3 Bucket
+      ConformancePackFile:
+        Default: Conformance Pack
+      EnableSecurityHubDefault:
+        default: Enable AWS SecurityHub using default configuration?
+      EnableGuardDutyDefault:
+        default: Enable Amazon GuardDuty using default configuration?
+      RDSSubnetIdList:
+        default: RDS private Subnet ID List
+      RDSSnapshotArn:
+        default: Database Snapshot ARN
+      LambdaSubnetIdList:
+        Default: VPC Lambda Subnets
+      LambdaS3:
+        Default: Lambda's S3 Bucket
+      IntegratorFile:
+        Default: Integrator Lambda
+      QuerierFile:
+        Default: SQL-Querier Lambda
+      LayerArn:
+        Default: PSYCOPG2
+
+Parameters: 
+  Owner:
+    Description: Enter Team or Individual Name Responsible for the Stack
+    Type: String
+    Default: FirstName LastName
+  ProjectName:
+    Type: String
+    Default: vsoc-mitre-integration-securityhub
+  DeleteAfter:
+    Description: Enter Date It's Ok to Delete the Stack or 'Never' if meant to be persistent
+    Type: String
+    Default: 00/00/202x
+  S3BucketURL:
+    Description: S3 bucket and folder URL containing CloudFormation templates
+    Type: String
+    Default: "https://"
+  EnableConfigDefault:
+    Type: String
+    Default: False
+    Description: AWS Config is required to detect resource configuration. (Ignore if AWS Config is already enabled)
+    AllowedValues:
+      - True
+      - False
+  ConformancePackS3:
+    Description: "ConformancePack S3 bucket"
+    Type: String
+    Default: "bucket"
+  ConformancePackFile:
+    Description: "ConformancePack folder and file name in S3"
+    Type: String
+    Default: "folder/Operational-Best-Practices-for-MITRE-ATT&CK.yaml"
+  EnableSecurityHubDefault:
+    Type: String
+    Default: False
+    Description: AWS SecurityHub is required. (Ignore if AWS SecurityHub is already enabled) 
+    AllowedValues:
+      - True
+      - False
+  EnableGuardDutyDefault:
+    Type: String
+    Default: False
+    Description: Amazon GuardDuty is required to detect activity. (Ignore if Amazon GuardDuty is already enabled) 
+    AllowedValues:
+      - True
+      - False
+  VPC:
+    Description: Select VPC
+    Type: AWS::EC2::VPC::Id
+  RDSSubnetIdList:
+    Description: Subnet ID List for Subnet Group Creation Allow Routing (separate by ,)
+    Type: String
+  RDSSnapshotArn:
+    Description: Can use the public snapshot or to create an encrypted copy of the public snapshot
+    Type: String
+  LambdaSubnetIdList:
+    Description: Subnet Id list for VPC Lambda to communicate with RDS
+    Type: String
+  LambdaS3:
+    Description: "S3 bucket where python code .zip is located"
+    Type: String
+    Default: "bucket"
+  IntegratorFile:
+    Description: "Python code .zip file name and folder in S3"
+    Type: String
+    Default: "folder/vsoc-mitreintsh-integrator-lambda.zip"
+  QuerierFile:
+    Description: "Python code .zip file name and folder in S3"
+    Type: String
+    Default: "folder/vsoc-mitreintsh-querier-lambda.zip"
+  LayerArn:
+    Description: "Required psycopg2 layer ARN"
+    Type: String
+    MinLength: 1
+  Language:
+    Description: Select data output language (esp|eng for spanish|english)
+    Type: String
+    Default: "esp"
+    AllowedValues:
+      - "esp"
+      - "eng"
+
+Mappings: {}
+
+Conditions:
+  EnableConfig: !Equals
+    - !Ref EnableConfigDefault
+    - True
+  EnableSecurityHub: !Equals
+    - !Ref EnableSecurityHubDefault
+    - True
+  EnableGuardDuty: !Equals
+    - !Ref EnableGuardDutyDefault
+    - True
+
+Resources:
+  #CMK Repository
+  CmkStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties:
+      Parameters: {}
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-cmk.yml"
+  #Database Repository
+  RdsStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties:
+      Parameters:
+        VPC: !Ref VPC
+        SubnetIdList: !Ref RDSSubnetIdList
+        SnapshotArn: !Ref RDSSnapshotArn
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-rds.yml"
+  #Database Reader Credentials
+  SecretsStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties: 
+      Parameters:
+        DefaultKey: !GetAtt CmkStack.Outputs.DefaultKey
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-secrets.yml"
+  #Lambda
+  LambdaStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties: 
+      Parameters: 
+        RDSAccessSecurityGroup: !GetAtt RdsStack.Outputs.RDSAccessSecurityGroup
+        RDSHostname: !GetAtt RdsStack.Outputs.RDSHostname
+        RDSPort: !GetAtt RdsStack.Outputs.RDSPort
+        RDSReaderCredential: !GetAtt SecretsStack.Outputs.SecretReaderCredentials
+        LambdaSubnetIdList: !Ref LambdaSubnetIdList
+        LayerArn: !Ref LayerArn
+        S3Bucket: !Ref LambdaS3
+        IntegratorFile: !Ref IntegratorFile
+        QuerierFile: !Ref QuerierFile
+        DefaultKey: !GetAtt CmkStack.Outputs.DefaultKey
+        Language: !Ref Language
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-lambda.yml"
+  #EventBridge Rules
+  EventsStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties: 
+      Parameters: 
+        IntegratorLambda: !GetAtt LambdaStack.Outputs.LambdaIntegrator
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-events.yml"
+  #AWS Config enabler
+  ConfigStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Condition: EnableConfig
+    Properties: 
+      Parameters: {}
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-enable-config.yml"
+  #AWS Config Conformance Pack
+  ConformancePackStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Properties: 
+      Parameters:
+        S3Bucket: !Ref ConformancePackS3
+        ConformancePackFile: !Ref ConformancePackFile
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-conformancepack.yml"  
+  #AWS SecurityHub enabler
+  SecurityHubStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Condition: EnableSecurityHub
+    Properties: 
+      Parameters: {}
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-enable-securityhub.yml"
+  #Amazon GuardDuty enabler
+  GuardDutyStack:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete
+    Condition: EnableGuardDuty
+    Properties: 
+      Parameters: {}
+      Tags: 
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TemplateURL: !Sub "${S3BucketURL}/vsoc-mitreintsh-enable-guardduty.yml"
+
+Outputs:
+  Owner:
+    Description: Team or Individual that Owns this Formation.
+    Value: !Ref Owner
+  Project:
+    Description: The project name
+    Value: !Ref ProjectName
+  DeleteAfter:
+    Description: It is ok to delete the Formation after this date
+    Value: !Ref DeleteAfter

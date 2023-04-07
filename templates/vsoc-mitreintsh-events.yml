@@ -1,0 +1,200 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   EventBridge Rule Template:
+#     Security Hub events for VSOC MITRE ATT&CK (v12) Integration Project
+#
+#   These rules help verify mitigaton protection up and detect atacks tecniques
+#   for MITRE ATT&CK v12.
+#
+#   See Parameters section for names and descriptions of required parameters.
+#
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Rules for detecting and sending Security Hub events to Integrator Lambda
+Metadata: {}
+
+Parameters: 
+  IntegratorLambda:
+    Description: VSOC MITRE ATT&CK project integration Lambda ARN 
+    Type: String
+
+Mappings: {}
+
+Conditions: {}
+
+Resources:
+  IntegrationMitreEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      DelaySeconds: "0"
+      MaximumMessageSize: "65536"
+      MessageRetentionPeriod: 7200
+      QueueName: "vsoc-mitreintsh-events-sqs"
+      ReceiveMessageWaitTimeSeconds: 20
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-events-sqs"
+      VisibilityTimeout: 60
+  IntegrationMitreEventsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Id: IntegrationMitreSqsPolicy
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Root-User
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - sqs:*
+            Resource: "*"
+          - Sid: Allow-EventsBridge-Sends
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:vsoc-mitreintsh-events-sqs"
+      Queues:
+        - !Ref IntegrationMitreEventsQueue
+  IntegrationMitreIntegratorLambdaTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 4
+      Enabled: true
+      EventSourceArn: !GetAtt IntegrationMitreEventsQueue.Arn
+      FunctionName: !Ref IntegratorLambda
+      MaximumBatchingWindowInSeconds: 0
+
+
+  IntegrationMitreTacticsUpdateEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Updates VSOC MITRE ATT&CK Tactis in Security Hub periodically
+      Name: "vsoc-mitreintsh-tactics-update-rule"
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets: 
+        - Arn: !Ref IntegratorLambda
+          Id: 'vsoc-mitreintsh-integrator-lambda'
+
+  IntegrationMitreAwsNativeEventRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: Checks AWS native services integrated in Security Hub changes
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductName:
+              - 'Config'
+              - 'GuardDuty'
+              - 'Macie'
+      Name: vsoc-mitreintsh-native-event-rule
+      Targets: 
+        - Arn: !GetAtt IntegrationMitreEventsQueue.Arn
+          Id: 'vsoc-mitreintsh-events-sqs'
+  IntegrationMitrePciSecurityHubEventRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: Checks PCI-DSS rules status changes in Security Hub
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductFields:
+              StandardsArn:
+                - 'arn:aws:securityhub:::standards/pci-dss/v/3.2.1'      
+      Name: vsoc-mitreintsh-pcisecurityhub-event-rule
+      Targets:
+        - Arn: !GetAtt IntegrationMitreEventsQueue.Arn
+          Id: 'vsoc-mitreintsh-events-sqs'
+  IntegrationMitreCisSecurityHubEventRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: Checks CIS rules status changes in Security Hub
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductFields:
+              StandardsGuideArn:
+                - 'arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.2.0'
+      Name: vsoc-mitreintsh-cissecurityhub-event-rule
+      Targets:
+        - Arn: !GetAtt IntegrationMitreEventsQueue.Arn
+          Id: 'vsoc-mitreintsh-events-sqs'
+  IntegrationMitreManagedInsightsSecurityHubEventRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: Checks Insights changes in Security Hub
+      State: DISABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Insight Results'
+        detail:
+          insightArn:
+            - 'arn:aws:securityhub:::insight/securityhub/default/9'
+            - 'arn:aws:securityhub:::insight/securityhub/default/25'
+            - 'arn:aws:securityhub:::insight/securityhub/default/13'
+            - 'arn:aws:securityhub:::insight/securityhub/default/21'
+            - 'arn:aws:securityhub:::insight/securityhub/default/16'
+            - 'arn:aws:securityhub:::insight/securityhub/default/18'
+            - 'arn:aws:securityhub:::insight/securityhub/default/37'
+            - 'arn:aws:securityhub:::insight/securityhub/default/10'          
+      Name: vsoc-mitreintsh-managedinsightssecurityhub-event-rule
+      Targets:
+        - Arn: !GetAtt IntegrationMitreEventsQueue.Arn
+          Id: 'vsoc-mitreintsh-events-sqs'
+  IntegrationMitreManagedIotDeviceDefenderEventRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: Checks AWS IOT Device Defender events in Security Hub
+      State: DISABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductFields:
+              ProviderName:
+                - 'IoTDeviceDefender'
+      Name: vsoc-mitreintsh-iotdevicedefender-event-rule
+      Targets: 
+        - Arn: !GetAtt IntegrationMitreEventsQueue.Arn
+          Id: 'vsoc-mitreintsh-events-sqs'
+
+Outputs:
+  EventSqs:
+    Description: Integrator Lambda SQS
+    Value: !Ref IntegrationMitreEventsQueue
+  EventRuleAwsNative:
+    Description: AWS Config, GuardDuty and Macie Events Rule
+    Value: !Ref IntegrationMitreAwsNativeEventRule
+  EventRulePci:
+    Description: PCI-DSS conformance Events Rule
+    Value: !Ref IntegrationMitrePciSecurityHubEventRule
+  EventRuleCis:
+    Description: CIS conformance Events Rule
+    Value: !Ref IntegrationMitreCisSecurityHubEventRule

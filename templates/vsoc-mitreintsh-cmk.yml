@@ -1,0 +1,75 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   Encryption Key Template:
+#     CMK for Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   Create a default encryption key (CMK) to be used in the project.
+#
+#   See Parameters section for names and descriptions of required parameters.
+# 
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create RDS From Snapshot for VSOC MITRE Integration Repository
+
+Metadata: {}
+
+Parameters:  {}
+
+Mappings: {}
+
+Conditions: {} 
+
+Resources: 
+  IntegrationMitreKey:
+    Type: AWS::KMS::Key
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties: 
+      Description: "VSOC Mitre Integration project CMK"
+      Enabled: true
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Sid: "Allows AWS Services to CMK"
+            Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+                - 's3.amazonaws.com'
+                - 'events.amazonaws.com'
+                - 'rds.amazonaws.com'
+                - 'cloudformation.amazonaws.com'
+                - 'secretsmanager.amazonaws.com'
+                - 'sqs.amazonaws.com'
+                - 'sns.amazonaws.com'
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey*'
+            Resource: '*'
+          - Sid: "Enable IAM User Permissions"
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - 'kms:*'
+            Resource: '*'          
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-kms"
+  IntegrationMitreKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties: 
+      AliasName: "alias/vsoc-mitreintsh-kms"
+      TargetKeyId: !Ref IntegrationMitreKey
+
+Outputs:
+  DefaultKey:
+    Description: VSOC MITRE integration project default key
+    Value: !GetAtt IntegrationMitreKey.Arn

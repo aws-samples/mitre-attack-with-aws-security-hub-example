@@ -1,0 +1,281 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   Lambda Template:
+#     Lambda Function for VSOC MITRE ATT&CK (v12) Integration project
+#
+#   Enriches Security Hub events by accessing the MITRE ATT&CK repository database.
+#
+#   See Parameters section for names and descriptions of required parameters.
+# 
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Lambda process to enrich Security Hub findings with MITRE ATT&CK
+Metadata: 
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - 
+        Label:
+          default: "Network Configuration"
+        Parameters:
+          - LambdaSubnetIdList
+          - RDSAccessSecurityGroup
+      - 
+        Label:
+          default: "RDS Access"
+        Parameters:
+          - RDSReaderCredential
+          - RDSHostname
+          - RDSPort
+          - RDSDbName
+          - DefaultKey
+      - 
+        Label:
+          default: "Lambda Code"
+        Parameters:
+          - S3Bucket
+          - IntegratorFile
+          - QuerierFile
+          - LayerArn
+          - Language
+
+    ParameterLabels:
+      LambdaSubnetIdList:
+        Default: VPC Lambda Subnets
+      RDSAccessSecurityGroup:
+        Default: Security Group for accesing RDS
+      RDSReaderCredential:
+        Default: Database Read User credentials Secret ARN
+      RDSHostname:
+        Default: Database endpoint
+      RDSPort:
+        Default: Database TCP Port
+      S3Bucket:
+        Default: S3 Bucket
+      IntegratorFile:
+        Default: Integrator Lambda
+      QuerierFile:
+        Default: SQL-Querier Lambda
+      LayerArn:
+        Default: PSYCOPG2
+
+Parameters: 
+  LambdaSubnetIdList:
+    Description: Subnet Id list for VPC Lambda to communicate with RDS
+    Type: String
+  RDSAccessSecurityGroup:
+    Description: SecurityGroup Allowing RDS connectivity
+    Type: String
+  RDSReaderCredential:
+    Description: Secrets ARN containing Database Read User Credentials
+    Type: String
+  RDSHostname:
+    Description: Enter RDS HTTP Endpoint
+    Type: String
+  RDSPort:
+    Description: Enter RDS Listening TCP Port number
+    Type: String
+  S3Bucket:
+    Description: "Python code .zip S3 bucket"
+    Type: String
+    Default: "bucket"
+  IntegratorFile:
+    Description: "Python code .zip file name and folder in S3"
+    Type: String
+    Default: "folder/vsoc-mitreintsh-integrator-lambda.zip"
+  QuerierFile:
+    Description: "Python code .zip file name and folder in S3"
+    Type: String
+    Default: "folder/vsoc-mitreintsh-querier-lambda.zip"
+  LayerArn:
+    Description: "Required psycopg2 layer ARN"
+    Type: String
+    MinLength: 1
+
+  RDSDbName:
+    Description: "VSOC MITRE Integration database's name (is not the same than RDS instance's name)"
+    Type: String
+    Default: "vsocmitreintegrationdatabase"
+  DefaultKey: 
+    Description: "Default Encryption Kms"
+    Type: String
+  Language:
+    Description: Select data output language (esp|eng for spanish|english)
+    Type: String
+    Default: "esp"
+    AllowedValues:
+      - "esp"
+      - "eng"
+      
+Mappings: {}
+
+Conditions: {}
+
+Resources:
+
+  IntegrationMitreQuerierLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: SQL Querier Lambda
+      FunctionName: 'vsoc-mitreintsh-querier-lambda'
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref QuerierFile
+      Layers:
+        - !Ref LayerArn
+      Handler: index.database_handler
+      MemorySize: 128
+      Role: !GetAtt IntegrationMitreQuerierLambdaRole.Arn
+      Runtime: 'python3.9'
+      Architectures:
+        - 'x86_64'
+      Timeout: 3
+      ReservedConcurrentExecutions: 5
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref RDSAccessSecurityGroup
+        SubnetIds: !Split [",", !Ref LambdaSubnetIdList]
+      Tags:
+        - Key: Name
+          Value: 'vsoc-mitreintsh-querier-lambda'
+
+  IntegrationMitreIntegratorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Receptor and Enrichement Lambda
+      FunctionName: 'vsoc-mitreintsh-integrator-lambda'
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref IntegratorFile
+      KmsKeyArn: !Ref DefaultKey 
+      Environment:
+        Variables:
+          DATABASE_READUSER: !Ref RDSReaderCredential
+          DATABASE_ENDPOINT: !Ref RDSHostname
+          DATABASE_PORT: !Ref RDSPort
+          DATABASE_NAME: !Ref RDSDbName
+          LANGUAGE: !Ref Language
+      Handler: index.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt IntegrationMitreIntegratorLambdaRole.Arn
+      Runtime: 'python3.9'
+      Architectures:
+        - 'x86_64'
+      Timeout: 6
+      ReservedConcurrentExecutions: 5
+      Tags:
+        - Key: Name
+          Value: 'vsoc-mitreintsh-integrator-lambda'
+
+  IntegrationMitreIntegratorLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref IntegrationMitreIntegratorLambda
+      Principal: "sqs.amazonaws.com"
+      SourceArn: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:vsoc-mitreintsh-events-sqs"
+  IntegrationMitreIntegratorTALambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref IntegrationMitreIntegratorLambda
+      Principal: "events.amazonaws.com"
+      SourceArn: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/vsoc-mitreintsh-tactics-update-rule"
+
+  IntegrationMitreQuerierLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: vsoc-mitreintsh-querier-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Tags:
+        - Key: Name
+          Value: 'vsoc-mitreintsh-querier-lambda-role'        
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole        
+
+  IntegrationMitreIntegratorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: vsoc-mitreintsh-integrator-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: vsoc-mitreintsh-readsecrets-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowsReadSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref RDSReaderCredential
+              - Sid: AllowsListSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                Resource: '*'
+              - Sid: UseCmk
+                Effect: Allow 
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref DefaultKey
+        - PolicyName: vsoc-mitreintsh-readsqs-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowsReceiveSqs
+                Effect: Allow
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:GetQueue*
+                  - sqs:ReceiveMessage
+                  - sqs:ChangeMessageVisibility
+                Resource: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:vsoc-mitreintsh-events-sqs"
+              - Sid: AllowsListSqs
+                Effect: Allow
+                Action:
+                  - sqs:ListQueues
+                Resource: '*'
+        - PolicyName: vsoc-mitreintsh-securityhub-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowsReadUpdateSecurityHub
+                Effect: Allow
+                Action:
+                  - securityhub:UpdateFindings
+                  - securityhub:GetFindings
+                  - securityhub:BatchUpdateFindings
+                  - securityhub:BatchImportFindings
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: 'vsoc-mitreintsh-integrator-lambda-role'        
+      ManagedPolicyArns:    
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+
+Outputs:
+  LambdaQuerier:
+    Description: SQL Querier Lambda ARN
+    Value: !GetAtt IntegrationMitreQuerierLambda.Arn 
+  LambdaIntegrator:
+    Description: Integrator Lambda ARN
+    Value: !GetAtt IntegrationMitreIntegratorLambda.Arn

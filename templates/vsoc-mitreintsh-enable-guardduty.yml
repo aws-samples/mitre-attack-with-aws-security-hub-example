@@ -1,0 +1,37 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   GuardDuty Pack:
+#     Amazon GuardDuty Template
+#
+#   Enables Amazon GuardDuty using default configuration.
+#
+#   See Parameters section for names and descriptions of required parameters.
+#
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Enable Amazon GuardDuty
+Metadata: {}
+
+Parameters: {} 
+
+Mappings: {}
+
+Conditions: {} 
+
+Resources: 
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Properties: 
+      Enable: true
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-guardduty"
+
+Outputs:
+  GuardDutyDetectorID:
+    Description: GuardDuty detector ID
+    Value: !Ref GuardDutyDetector

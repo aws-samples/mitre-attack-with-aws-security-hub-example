@@ -1,0 +1,203 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   Repository Template:
+#     RDS for VSO MITRE ATT&CK (v12) Integration Project
+#
+#   Create RDS From Snapshot for MITRE Integration Repository. This database will
+#   not contain sensitive data.
+#   See Parameters section for names and descriptions of required parameters.
+# 
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create RDS From Snapshot for VSOC MITRE Integration Repository
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: RDS Network Configuration
+        Parameters:
+          - VPC
+          - SubnetIdList
+      - Label:
+          default: RDS Configuration
+        Parameters:
+          - SnapshotArn
+          - InstanceType
+          - BackupRetentionPeriod
+          - PreferredBackupWindow
+          - PreferredMaintenanceWindow
+          - SnapshotOnDelete
+          - AutoMinorVersionUpgrade
+          - TcpPort
+
+    ParameterLabels:
+      InstanceType:
+        default: Instance Type
+      SubnetIdList:
+        default: Private Subnet ID List
+      BackupRetentionPeriod:
+        default: Backup Retention Period
+      PreferredBackupWindow:
+        default: Preferred Backup Window
+      PreferredMaintenanceWindow:
+        default: Preferred Maintenance Window
+      AutoMinorVersionUpgrade:
+        default: Auto Minor Version Upgrade
+      TcpPort:
+        default: TCP Port
+      SnapshotOnDelete:
+        default: Snapshot On Delete?
+      SnapshotArn:
+        default: Snapshot ARN
+
+Parameters:
+  VPC:
+    Description: Select VPC
+    Type: AWS::EC2::VPC::Id
+  SubnetIdList:
+    Description: Subnet ID List for Subnet Group Creation Allow Routing
+    Type: String
+  TcpPort:
+    Description: Enter RDS Listening TCP Port number
+    Type: Number
+    Default: 5432
+  BackupRetentionPeriod:
+    Description: Enter Backup Retention Period in Days
+    Type: Number
+    Default: 7
+  PreferredBackupWindow:
+    Description: Enter Preferred Backup Window Time (UTC)
+    Type: String
+    Default: 02:27-02:57
+  PreferredMaintenanceWindow:
+    Description: Enter Preferred Maintenance Window Time (UTC)
+    Type: String
+    Default: Sun:19:00-Sun:23:00
+  SnapshotOnDelete:
+    Description: Create a Snapshot on Delete?
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+  AutoMinorVersionUpgrade:
+    Description: Allow Automatic Minor Version Upgrades?
+    Type: String
+    Default: true
+    AllowedValues:
+      - true
+      - false
+  InstanceType:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues:
+      - db.t2.micro
+      - db.t3.micro
+      - db.t4g.micro
+  SnapshotArn:
+    Description: Database snapshot localization
+    Type: String
+
+Conditions: {} 
+
+Resources:
+
+  IntegrationMitreRdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to VSOC MITRE Repository RDS
+      GroupName: 'vsoc-mitreintsh-rds-sg'
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: 'vsoc-mitreintsh-rds-sg'
+        
+  IntegrationMitreRdsSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref IntegrationMitreRdsSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref TcpPort
+      ToPort: !Ref TcpPort
+      SourceSecurityGroupId: !Ref IntegrationMitreRdsSecurityGroup
+  IntegrationMitreRdsSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: RDS Subnet Group for VSOC Mitre Integration Project
+      DBSubnetGroupName: 'vsoc-mitreintsh-rds-netgroup'
+      SubnetIds: !Split [",", !Ref SubnetIdList]
+      Tags:
+      - Key: Name
+        Value: 'vsoc-mitreintsh-rds-netgroup'
+  IntegrationMitreRdsInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      AllocatedStorage: '30'
+      DBInstanceClass: !Ref InstanceType
+      DeletionProtection: true
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: !Ref AutoMinorVersionUpgrade
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      DBInstanceIdentifier: !Sub
+        - "${version}"
+        -  version: !Select ["6", !Split [":",!Ref SnapshotArn] ]
+      DBSnapshotIdentifier: !Ref SnapshotArn
+      DBSubnetGroupName: !Ref IntegrationMitreRdsSubnetGroup
+      Engine: postgres
+      EngineVersion: '14.4'
+      LicenseModel: 'postgresql-license'
+      MultiAZ: true
+      Port: !Ref TcpPort
+      PreferredBackupWindow: !Ref PreferredBackupWindow
+      PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow
+      PubliclyAccessible: false
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !Ref IntegrationMitreRdsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub
+            - "${version}"
+            -  version: !Select ["6", !Split [":",!Ref SnapshotArn] ]
+Outputs:
+  RDSVPC:
+    Description: VPC Used
+    Value: !Ref VPC
+  RDSHostname:
+    Description: RDS Hostname
+    Value:
+      Fn::GetAtt:
+      - IntegrationMitreRdsInstance
+      - Endpoint.Address
+  RDSPort:
+    Description: RDS Port
+    Value:
+      Fn::GetAtt:
+      - IntegrationMitreRdsInstance
+      - Endpoint.Port
+  RDSSubnetGroup:
+    Description: DataBase Subnet Group Created.
+    Value: !Ref IntegrationMitreRdsSubnetGroup
+  RDSAccessSecurityGroup:
+    Description: RDS Access Security Group Created.
+    Value: !Ref IntegrationMitreRdsSecurityGroup
+  RDSSubnetIdList:
+    Description: Private Subnet 1 Deployment
+    Value: !Ref SubnetIdList
+  RDSBackupRetentionPeriod:
+    Description: Backup Retention Period in Days
+    Value: !Ref BackupRetentionPeriod
+  RDSSnapshotOnDelete:
+    Description: Create Snapshot on Delete?
+    Value: !Ref SnapshotOnDelete
+  RDSPreferredBackupWindow:
+    Description: Preferred Backup Window
+    Value: !Ref PreferredBackupWindow
+  RDSPreferredMaintenanceWindow:
+    Description: Preferred Maintenance Window
+    Value: !Ref PreferredMaintenanceWindow

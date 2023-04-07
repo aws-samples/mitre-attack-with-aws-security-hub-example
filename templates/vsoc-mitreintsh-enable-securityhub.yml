@@ -1,0 +1,35 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   SecurityHub Pack:
+#     AWS SecurityHub Template
+#
+#   Enables AWS SecurityHub using default configuration, without standards.
+#
+#   See Parameters section for names and descriptions of required parameters.
+#
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Enable AWS SecurityHub
+
+Metadata: {}
+
+Parameters: {}
+
+Mappings: {}
+
+Conditions: {} 
+
+Resources: 
+  SecurityHub:
+    Type: AWS::SecurityHub::Hub
+    Properties:
+      Tags: 
+        Key: Name
+        Value: 'vsoc-mitreintsh-securityhub'
+
+Outputs:
+  HubArn:
+    Value: !Ref SecurityHub

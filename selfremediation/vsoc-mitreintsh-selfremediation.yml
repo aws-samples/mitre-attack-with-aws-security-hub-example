@@ -1,0 +1,790 @@
+##################################################################################
+#
+#   Virtual SOC with MITRE Attack integration with AWS Security Hub
+#
+#   Self-Remediation Template:   
+#     Deploys and configures AWS services and resources in order to
+#     auto-remediate MITRE ATT&CK findings at SecurityHub.
+#
+#   See Parameters section for names and descriptions of required parameters.
+#
+#  MIT License:
+#
+#  Copyright (c) 2023
+#
+#  Permission is hereby granted, free of charge, to any person obtaining a copy
+#  of this software and associated documentation files (the "Software"), to deal
+#  in the Software without restriction, including without limitation the rights
+#  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#  copies of the Software, and to permit persons to whom the Software is
+#  furnished to do so, subject to the following conditions:
+#
+#  The above copyright notice and this permission notice shall be included in all
+#  copies or substantial portions of the Software.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#  SOFTWARE.
+##################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: VSOC MITRE ATT&CK Integration techniques auto-remediation 
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Folders
+        Parameters:
+          - S3Bucket
+      - Label:
+          default: Ownership
+        Parameters:
+          - Owner
+          - ProjectName
+          - DeleteAfter
+      - Label:
+          default: Organization
+        Parameters:
+          - SecAccount
+      - Label:
+          default: Credential Access
+        Parameters:
+          - Case1
+          - Case1zip
+      - Label:
+          default: Impact
+        Parameters:
+          - Case2
+          - Case2zip
+      - Label:
+          default: Privilege Escalation
+        Parameters:
+          - Case3
+          - Case3zip
+          - Case3email
+          - Case3emailDisplay
+          - Case3group
+          - Case3exceptionNam
+
+    ParameterLabels:
+      Owner:
+        default: Team or Individual Owner
+      DeleteAfter:
+        default: Delete After Date
+      S3Bucket:
+        default: S3 Bucket
+      SecAccount:
+        default: "Organization's Security Account"
+      Case1:
+        default: Enable auto-remediation for T1110-Brute Force, T1552-Unsecured Credentials
+      Case2:
+        default: Enable auto-remediation for T1485-Data Destruction
+      Case3:
+        default: Enable auto-remediation for T1484-Domain Policy Modificatio, T1078-Valid Accounts
+      Case3email:
+        default: Notification email address
+      Case3emailDisplay:
+        default: Notification email title
+      Case3group:
+        default: Isolation group name
+      Case3exceptionNam:
+        default: Exception if user name
+
+Parameters:
+  Owner:
+    Description: Enter Team or Individual Name Responsible for the Stack
+    Type: String
+    Default: FirstName LastName
+  ProjectName:
+    Type: String
+    Default: vsoc-mitreintsh-selfremediation
+  DeleteAfter:
+    Description: Enter Date It's Ok to Delete the Stack or 'Never' if meant to be persistent
+    Type: String
+    Default: 00/00/202x
+  S3Bucket:
+    Description: S3 bucket containing Lambda Zip files
+    Type: String
+  Case1zip:
+    Description: Lambda Zip for Credential Access case folder and file
+    Type: String
+    Default: "folder/vsoc-mitreintsh-ta0006-lambda.zip"
+  Case2zip:
+    Description: Lambda Zip for Impact case folder and file
+    Type: String
+    Default: "folder/vsoc-mitreintsh-ta0040-lambda.zip"
+  Case3zip:
+    Description: Lambda Zip for Privilege Escalation case folder and file
+    Type: String
+    Default: "folder/vsoc-mitreintsh-ta0004-lambda.zip"
+  SecAccount:
+    Description: AWS Account ID at where Security Hub is centralized
+    Type: String
+    MinLength: 12
+    MaxLength: 12
+    AllowedPattern: ^[0-9]{12}$
+    ConstraintDescription: must contain 12 numbers
+  Case1:
+    Description: When anomalous access is detected, password policy is hardened and console users must reset password
+    Type: String
+    AllowedValues:
+      - True
+      - False
+    Default: False
+  Case2:
+    Description: When a resource is created, data-lost protection is enforced (CloudTrail, KMS, DynamoDB, RDS, Redis, ELB, Redshift, S3)
+    Type: String
+    AllowedValues:
+      - True
+      - False
+    Default: False
+  Case3:
+    Description: When anomalous IAM activity is detected, user is isolated without privileges and an email is sent to security managers
+    Type: String
+    AllowedValues:
+      - True
+      - False
+    Default: False
+  Case3email:
+    Description: Security admins or operational group email
+    Type: String
+  Case3emailDisplay:
+    Description: Static title that email notification will use
+    Type: String
+    Default: "[VSOC MITRE] User isolated due Privilege Escalation"
+  Case3group:
+    Description: IAM group name
+    Type: String
+    Default: vsoc-suspicious-isolation-group
+  Case3exceptionNam:
+    Description: To prevent admins lose privileges, these users may be put in isolation group but they will not lose privileges (separate by ,)
+    Type: String
+    MinLength: 1
+
+Mappings: {}
+
+Conditions:
+  ThisIsSecurityManagementAccount: !Equals
+    - !Ref SecAccount
+    - !Ref AWS::AccountId
+  ThisIsNotSecurityManagementAccount: !Not [Condition: ThisIsSecurityManagementAccount]
+  EnableCase1: !Equals
+    - !Ref Case1
+    - True
+  EnableCase1SecAccount: !And
+    - Condition: ThisIsSecurityManagementAccount
+    - Condition: EnableCase1
+  EnableCase2: !Equals
+    - !Ref Case2
+    - True
+  EnableCase2SecAccount: !And
+    - Condition: ThisIsSecurityManagementAccount
+    - Condition: EnableCase2
+  EnableCase3: !Equals
+    - !Ref Case3
+    - True
+  EnableCase3SecAccount: !And
+    - Condition: ThisIsSecurityManagementAccount
+    - Condition: EnableCase3
+
+
+Resources:
+  # Auto-remediation Encryption Key
+  SelfRemediationMitreKey:
+    Type: AWS::KMS::Key
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties: 
+      Description: "Self-remediation VSOC Mitre project CMK"
+      Enabled: true
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Sid: "Allows AWS Services to CMK"
+            Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+                - 'sns.amazonaws.com'
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey*'
+            Resource: '*'
+          - Sid: "Enable IAM User Permissions"
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - 'kms:*'
+            Resource: '*'          
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-self-remediation-kms"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter 
+  SelfRemediationMitreAlias:
+    Type: AWS::KMS::Alias
+    Properties: 
+      AliasName: "alias/vsoc-mitreintsh-self-remediation-kms"
+      TargetKeyId: !Ref SelfRemediationMitreKey
+
+  # Credential Access (TA0006) Lambda
+  CredentialAccessLambda:
+    Type: AWS::Lambda::Function
+    Condition: EnableCase1SecAccount
+    Properties:
+      Architectures:
+        - 'x86_64'
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref Case1zip
+      Description: "Auto-remediates TA0006 Credential Access cases"
+      FunctionName: "vsoc-mitreintsh-ta0006-lambda"
+      Handler: "index.lambda_handler"
+      MemorySize: 128
+      Role: !GetAtt RemediationLambdaRole.Arn
+      Runtime: "python3.9"
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-ta0006-lambda"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter 
+  # Impact (TA0040) Lambda
+  ImpactLambda:
+    Type: AWS::Lambda::Function
+    Condition: EnableCase2SecAccount
+    Properties:
+      Architectures:
+        - 'x86_64'
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref Case2zip
+      Description: "Auto-remediates TA0040 Impact cases"
+      FunctionName: "vsoc-mitreintsh-ta0040-lambda"
+      Handler: "index.lambda_handler"
+      MemorySize: 128
+      Role: !GetAtt RemediationLambdaRole.Arn
+      Runtime: "python3.9"
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-ta0040-lambda"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+  # Privilege Escalation (TA0004) Lambda 
+  PrivilegeEscalationLambda:
+    Type: AWS::Lambda::Function
+    Condition: EnableCase3SecAccount
+    Properties:
+      Architectures:
+        - 'x86_64'
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref Case3zip
+      Description: "Auto-remediates TA0004 Privilege Escalation"
+      FunctionName: "vsoc-mitreintsh-ta0004-lambda"
+      Handler: "index.lambda_handler"
+      KmsKeyArn: !GetAtt SelfRemediationMitreKey.Arn
+      Environment:
+        Variables:
+          ISOLATION_GROUP: !Ref Case3group
+          NOTIFICATION_SNS: !Ref PrivilegeEscalationTopic
+      MemorySize: 128
+      Role: !GetAtt RemediationLambdaRole.Arn
+      Runtime: "python3.9"
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-ta0004-lambda"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+
+  # Credential Access (TA0006) Lambda EventsBridge Permission
+  CredentialAccessLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableCase1SecAccount
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref CredentialAccessLambda
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt CredentialAccessEventRule.Arn
+  # Impact (TA0040) Lambda EventsBridge Permission
+  ImpactLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableCase2SecAccount
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref ImpactLambda
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt ImpactEventRule.Arn
+  # Privilege Escalation (TA0004) EventsBridge Permission
+  PrivilegeEscalationLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableCase3SecAccount
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref PrivilegeEscalationLambda
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt PrivilegeEscalationEventRule.Arn
+
+  # Cross Account Assumed Role
+  CrossAccountRole:
+    Type: AWS::IAM::Role
+    Condition: ThisIsNotSecurityManagementAccount
+    Properties:
+      RoleName: "vsoc-mitreintsh-remediation-cross-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${SecAccount}:role/vsoc-mitreintsh-remediation-lambda-role"
+            Action: sts:AssumeRole
+            Condition: { }
+      Path: /
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-remediation-cross-role"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+  # Sec Account Assumed Role
+  NoCrossAccountRole:
+    Type: AWS::IAM::Role
+    Condition: ThisIsSecurityManagementAccount
+    DependsOn: RemediationLambdaRole
+    Properties:
+      RoleName: "vsoc-mitreintsh-remediation-cross-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${SecAccount}:role/vsoc-mitreintsh-remediation-lambda-role"
+            Action: sts:AssumeRole
+            Condition: { }
+      Path: /
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-remediation-cross-role"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+  # Remediation Lambda Role
+  RemediationLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: ThisIsSecurityManagementAccount
+    Properties:
+      RoleName: "vsoc-mitreintsh-remediation-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition: { }
+      Path: /
+      Policies:
+        - PolicyName: "vsoc-mitreintsh-cross-account-policy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowsAssumeCARole
+                Effect: Allow
+                Action: 
+                  - 'sts:AssumeRole'
+                Resource: "arn:aws:iam::*:role/vsoc-mitreintsh-remediation-cross-role"
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-remediation-lambda-role"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AWSConfigUserAccess
+  # Privilege Escalation (TA0004) Isolation IAM Group
+  IsolationGroup:
+    Type: AWS::IAM::Group
+    Condition: EnableCase3
+    Properties:
+      GroupName: !Ref Case3group
+
+  # Privilege Escalation (TA0004) Isolation IAM Group Policy
+  IsolationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EnableCase3
+    Properties:
+      Description: "Isolates the user, denying any privilege"
+      Groups:
+        - !Ref IsolationGroup
+      ManagedPolicyName: "vsoc-mitreintsh-isolation-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: "BlockAllAccess"
+            Effect: Deny
+            Action: '*'
+            Resource: '*'
+            Condition:
+              StringNotEquals:
+                aws:username: !Split [",", !Ref Case3exceptionNam]
+  # Credential Access (TA0006) Policy
+  CredentialAccessLambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EnableCase1
+    Properties:
+      Description: "Allows IAM user and password modifications"
+      ManagedPolicyName: "vsoc-mitreintsh-ta0006-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: "ReadAccess"
+            Effect: Allow
+            Action:
+              - 'iam:Get*'
+              - 'iam:List*'
+              - 'iam:UpdateAccountPasswordPolicy'
+            Resource: '*'
+          - Sid: "UnlimitedUpdateAccess"
+            Effect: Allow
+            Action:
+              - 'iam:UpdateAccountPasswordPolicy'
+            Resource: '*'
+          - Sid: "LimitedUpdateAccess"
+            Effect: Allow
+            Action:
+              - 'iam:GenerateServiceLastAccessedDetails'
+              - 'iam:ChangePassword'
+              - 'iam:UpdateLoginProfile'
+              - 'iam:UpdateUser'
+              - 'iam:UpdateAccessKey'
+              - 'iam:CreateAccessKey'
+              - 'iam:CreateLoginProfile'
+              - 'iam:EnableMFADevice'
+              - 'iam:ResyncMFADevice'
+              - 'iam:DeleteLoginProfile'
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:user/*'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/*'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:group/*'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:mfa/*'
+      Roles:
+        - !If [ ThisIsSecurityManagementAccount, !Ref NoCrossAccountRole ,!Ref CrossAccountRole]
+  # Impact (TA0040) Policy
+  ImpactLambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EnableCase2
+    Properties:
+      Description: "Allows resource data protection modifications"
+      ManagedPolicyName: "vsoc-mitreintsh-ta0040-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: "CloudTrail"
+            Effect: Allow
+            Action:
+              - 'cloudtrail:DescribeTrails'
+            Resource: '*'
+          - Sid: "UpdateCloudTrail"
+            Effect: Allow
+            Action:
+              - 'cloudtrail:UpdateTrail'
+            Resource:
+              - !Sub "arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/*"
+          - Sid: "UpdateKms"
+            Effect: Allow
+            Action:
+              - 'kms:EnableKeyRotation'
+              - 'kms:GetKeyRotationStatus'
+            Resource:
+              - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+          - Sid: "UpdateS3"
+            Effect: Allow
+            Action:
+              - 's3:GetBucketVersioning'
+              - 's3:PutBucketVersioning'
+            Resource:
+              - "arn:aws:s3:::*"
+          - Sid: "UpdateDynamodb"
+            Effect: Allow
+            Action:
+              - 'dynamodb:ListTables'
+              - 'dynamodb:DescribeContinuousBackups'
+              - 'dynamodb:DescribeBackup'
+              - 'dynamodb:UpdateContinuousBackups'
+            Resource: '*'
+          - Sid: "UpdateELBv2"
+            Effect: Allow
+            Action:
+              - 'elasticloadbalancing:DescribeLoadBalancerAttributes'
+              - 'elasticloadbalancing:ModifyLoadBalancerAttributes'
+            Resource: '*'
+          - Sid: "UpdateRDSInstances"
+            Effect: Allow
+            Action:
+              - 'rds:DescribeDBInstances'
+              - 'rds:ModifyDBInstance'
+            Resource:
+              - !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:*"
+          - Sid: "UpdateElasticache"
+            Effect: Allow
+            Action:
+              - 'elasticache:ModifyCacheCluster'
+              - 'elasticache:DescribeCacheClusters'
+              - 'elasticache:DescribeReplicationGroups'
+              - 'elasticache:ModifyReplicationGroup'
+            Resource:
+              - !Sub "arn:aws:elasticache:${AWS::Region}:${AWS::AccountId}:cluster:*"
+              - !Sub "arn:aws:elasticache:${AWS::Region}:${AWS::AccountId}:replicationgroup:*"
+          - Sid: "DescribeRedshift"
+            Effect: Allow
+            Action:
+              - 'redshift:DescribeClusterVersions'
+              - 'redshift:DescribeClusterSnapshots'
+              - 'redshift:DescribeClusters'
+              - 'redshift:DescribeClusterParameterGroups'
+              - 'redshift:DescribeClusterParameters'
+              - 'redshift:DescribeSnapshotSchedules'
+              - 'redshift:DescribeSnapshotCopyGrants'
+            Resource: '*'
+          - Sid: "UpdateRedshift1"
+            Effect: Allow
+            Action:
+              - 'redshift:ModifyClusterSnapshotSchedule'
+              - 'redshift:BatchModifyClusterSnapshots'
+              - 'redshift:ModifyClusterSnapshot'
+              - 'redshift:ModifyCluster'
+              - 'redshift:ModifySnapshotSchedule'
+              - 'redshift:ModifySnapshotCopyRetentionPeriod'
+            Resource:
+              - !Sub 'arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:cluster:*'
+              - !Sub 'arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:snapshot:*/*'
+              - !Sub 'arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:snapshotschedule:*'
+          - Sid: "UpdateRedshift2"
+            Effect: Allow
+            Action:
+              - 'redshift:ModifyClusterMaintenance'
+            Resource: '*'
+      Roles:
+        - !If [ ThisIsSecurityManagementAccount, !Ref NoCrossAccountRole ,!Ref CrossAccountRole]
+  # Privilege Escalation (TA0004) Policy
+  PrivilegeEscalationLambdaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EnableCase3
+    Properties:
+      Description: "Allows attach users to Isolation Group"
+      ManagedPolicyName: "vsoc-mitreintsh-ta0004-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: "IamGroupPermissions"
+            Effect: Allow
+            Action:
+              - 'iam:AddUserToGroup'
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:group/${Case3group}"
+      Roles:
+        - !If [ ThisIsSecurityManagementAccount, !Ref NoCrossAccountRole ,!Ref CrossAccountRole]
+  # Privilege Escalation (TA0004) SNS Policy
+  PrivilegeEscalationLambdaSnsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EnableCase3SecAccount
+    Properties:
+      Description: "Allows Publish SNS notification"
+      ManagedPolicyName: "vsoc-mitreintsh-ta0004-sns-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: "PublishSNS"
+            Effect: Allow
+            Action:
+              - 'sns:Publish'
+            Resource:
+              - !Ref PrivilegeEscalationTopic
+          - Sid: "EncryptSNS"
+            Effect: Allow
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey*'
+            Resource:
+              - !GetAtt SelfRemediationMitreKey.Arn
+      Roles:
+        - !Ref RemediationLambdaRole
+
+  # Credential Access (TA0006) EventBridgeRule
+  CredentialAccessEventRule:
+    Type: AWS::Events::Rule
+    Condition: EnableCase1SecAccount
+    Properties: 
+      Description: Checks for Credential Access (TA0006), Brute Force (T1110), Unsecured Credentials (T1552) findings
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductName:
+              - 'MITRE ATT&CK'
+            RecordState:
+              - 'ACTIVE'
+            Title:
+              - prefix: 'T1110'
+              - prefix: 'T1552'
+      Name: vsoc-mitreintsh-ta0006-rule
+      Targets: 
+        - Arn: !GetAtt CredentialAccessLambda.Arn
+          Id: "vsoc-mitreintsh-ta0006-lambda"
+  # Impact (TA0040) EventBridgeRule
+  ImpactEventRule:
+    Type: AWS::Events::Rule
+    Condition: EnableCase2SecAccount
+    Properties: 
+      Description: Checks for Impact (TA0040), Data Destruction (T1485) findings
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductName:
+              - 'MITRE ATT&CK'
+            RecordState:
+              - 'ACTIVE'
+            Title:
+              - prefix: 'T1485'
+      Name: vsoc-mitreintsh-ta0040-rule
+      Targets: 
+        - Arn: !GetAtt ImpactLambda.Arn
+          Id: "vsoc-mitreintsh-ta0040-lambda"
+  # Privilege Escalation (TA0004) EventBridgeRule
+  PrivilegeEscalationEventRule:
+    Type: AWS::Events::Rule
+    Condition: EnableCase3SecAccount
+    Properties: 
+      Description: Checks for Privilege Escalation (TA0004), Domain Policy Modification (T1484), Valid Accounts (T1078) findings
+      State: ENABLED
+      EventPattern:
+        source:
+          - 'aws.securityhub'
+        detail-type:
+          - 'Security Hub Findings - Imported'
+        detail:
+          findings:
+            ProductName:
+              - 'MITRE ATT&CK'
+            RecordState:
+              - 'ACTIVE'
+            Title:
+              - prefix: 'T1484'
+              - prefix: 'T1078'
+      Name: vsoc-mitreintsh-ta0004-rule
+      Targets: 
+        - Arn: !GetAtt PrivilegeEscalationLambda.Arn
+          Id: "vsoc-mitreintsh-ta0004-lambda"
+  
+  # Privilege Escalation (TA0004) SNS Topic
+  PrivilegeEscalationTopic:
+    Type: AWS::SNS::Topic
+    Condition: EnableCase3SecAccount
+    Properties:
+      DisplayName: !Ref Case3emailDisplay
+      KmsMasterKeyId: !Ref SelfRemediationMitreKey
+      Tags:
+        - Key: Name
+          Value: "vsoc-mitreintsh-ta0004-sns"
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: DeleteAfter
+          Value: !Ref DeleteAfter
+      TopicName: "vsoc-mitreintsh-ta0004-sns"
+  # Privilege Escalation (TA0004) SNS Topic Policy
+  PrivilegeEscalationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: EnableCase3SecAccount
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Sid: AllowLambdaPublishAlarms
+            Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action:
+              - 'SNS:Publish'
+            Resource: !Ref PrivilegeEscalationTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  - !GetAtt RemediationLambdaRole.Arn
+      Topics: 
+        - !Ref PrivilegeEscalationTopic
+  # Privilege Escalation (TA0004) SNS Topic Subscription
+  PrivilegeEscalationTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: EnableCase3SecAccount
+    Properties: 
+      Endpoint: !Ref Case3email
+      Protocol: email
+      TopicArn: !Ref PrivilegeEscalationTopic
+
+Outputs:
+  CredentialAccessLambda:
+    Description: Auto-remediates TA0006 Credential Access cases
+    Condition: EnableCase1SecAccount
+    Value: !GetAtt CredentialAccessLambda.Arn
+  ImpactLambda:
+    Description: Auto-remediates TA0040 Impact cases
+    Condition: EnableCase2SecAccount
+    Value: !GetAtt ImpactLambda.Arn
+  PrivilegeEscalationLambda:
+    Description: Auto-remediates TA0004 Privilege Escalation
+    Condition: EnableCase3SecAccount
+    Value: !GetAtt PrivilegeEscalationLambda.Arn
+  CrossAccountRole:
+    Description: Auto-remediation Cross-Account access role
+    Condition: ThisIsNotSecurityManagementAccount
+    Value: !Ref CrossAccountRole
+  IsolationGroup:
+    Description: Privilege Escalation (TA0004) Isolation IAM Group
+    Condition: EnableCase3
+    Value: !Ref IsolationGroup

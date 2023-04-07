@@ -1,0 +1,18 @@
+mp.com.2,Confidentiality protection
+mp.com.3,Integrity and authenticity protection
+mp.com.4,Separation of information flows in the network
+mp.info.6,Backups
+mp.per.3,Training
+mp.s.2,Services and Web Applications protection
+mp.s.3,Web browsing protection
+mp.s.4,DoS protection
+mp.sw.1,Applications development
+op.acc.2,Access requirements
+op.acc.3,Tasks and duties segregation
+op.acc.4,Access rights management process
+op.acc.6,"Authentication mechanism (users of the
+organization)"
+op.exp.2,Security settings
+op.exp.8,Activity log
+op.mon.1,Intrusion detection
+op.mon.3,Monitoring
